@@ -1,26 +1,27 @@
 from dataclasses import dataclass
 import json
+import logging
 import asyncio
 import hashlib
-import sys
 import random
 import time
 import base64 # encoding bytes to a string for JSON
 
-# globalvalues to simulate all clients having a synchronized current transaction and block
+# global values to simulate all clients having a synchronized current transaction and block
 curr_transaction_id = 0
 curr_block_id = 0
 
+# This is the max number of transactions in a block.
 # The block cap is set low for testing only.
 BLOCK_CAP = 20
 
-# print transactions
+# log transactios
 PRINT_TRANSACTIONS = False
 
-# print "incoming" blocks
+# log "incoming" blocks
 PRINT_NEW_BLOCKS = False
 
-# print hashes
+# log hashes
 PRINT_HASHES = False
 
 # how many nibbles must be 0 at the beginning of the hash
@@ -31,11 +32,13 @@ DELAY = False
 
 @dataclass
 class Transaction:
+    """
+    Class to represent a transaction.
+    """
     id: int 
     sender: str
     receiver: str
     amount: int
-    # perhaps add a digital signature?
 
     def __str__(self) -> str: # allows str(Transaction)
         return f"({self.id},{self.sender},{self.receiver},{self.amount})"
@@ -59,16 +62,24 @@ class Transaction:
 
 @dataclass
 class Block:
+    """
+    Class to model a block.
+    """
+
     id: int
     transactions: list[Transaction]
     timestamp: float # UNIX timestamp + decimal, from time.time()
     prev_hash: bytes
     pow: bytes # proof of work
 
+    # brute force the hash
     def mine(self):
+        # the function is only used inside this function,
+        # so just declare it inside
         def int_to_bytes(num: int) -> bytes:
-            return num.to_bytes(32, 'big')
+            return num.to_bytes(32, 'big') # specify big-endian encoding
 
+        # if the proof of work is already mined and not empty, leave.
         if self.pow != bytes():
             return
 
@@ -96,10 +107,11 @@ class Block:
     
     def hash(self) -> bytes:
         h = self.to_str(include_pow=True)
-        h = bytes(h, 'utf-8') # hashlib expects a ReadableBuffer which str does not implement (but bytes doens)
+        h = bytes(h, 'utf-8') # hashlib expects a ReadableBuffer which str does not implement (but bytes does)
         h = hashlib.sha256(h).digest() # digest at the end to get a bytes
         return h
 
+    # Functions to encode/serialize/deserialize the block
     # add include_pow as a kwarg to enable/disable adding the proof of work for mining
     def to_str(self, include_pow=False) -> str:
         """
@@ -114,15 +126,25 @@ class Block:
         "{index;transactions;timestamp;previous hash}+proof of work"
         """
         
+        # start building transaction string
         transactions = "["
+
+        # loop over all transactions and keep an index
         for idx, transaction in enumerate(self.transactions):
+
+            # stringify each transaction and add a semicolon if it is not
+            # the last element
             transactions += str(transaction)
             if idx != len(self.transactions)-1:
                 transactions += ';'
+
+        transactions += "]"
         
+        # build the string
         res = f"{{{self.id};{transactions};{self.timestamp};{self.prev_hash.hex()}}}"
         if include_pow:
             res += f"+{self.pow.hex()}}}"
+        
         return res
 
     def to_dict(self) -> dict:
@@ -154,57 +176,50 @@ class Block:
         d = json.loads(data)
         return Block.from_dict(d)
 
-
-
-@dataclass
-class Node:
-    id: int
-    ipaddr: str
-    port: int
-
-    async def send(self, data: str):
-        await asyncio.sleep(1) # represent a network task that sends the data to another node
-
-        data = data[:10] # limit logging to 10 chars
-        print(f"sent \"{data}...\" to node: {self.id} ({self.ipaddr}:{self.port})")
-
-# utility function for inputting numbers
-def input_int(*args, **kwargs) -> int:
-    """
-    using input without any inputs might lead to unwanted program crashes.
-    with *args and **kwargs and recursion a safe function for inputting numbers
-    that will not result in program crashes should be used.
-
-    *args are all the unnamed parameters, and **kwargs are all keyword arguments.
-    """
-
-    val = input(*args, **kwargs) # expand out the args and keyword args
-
-    try:
-        return int(val)
-    except ValueError:
-        print("Invalid Input, try again!", file=sys.stderr)
-        return input_int(*args, **kwargs)
-
-
-# dummy functions to simulate things coming in from the network
 async def next_transaction(wait=True) -> Transaction:
-    global curr_transaction_id
+    """
+    Function to simulate getting a new transaction over
+    the network.
 
-    NAMES = ["John", "James", "Peter", "Harry", "Marcus", "James"]
+    In reality, the transaction would not be randomly generated,
+    instead it would be from real transactions.
+
+    Edit the transactions.json file if you want to simulate real
+    transactions being put into the system.
+    """
+
+    global curr_transaction_id 
+
+    NAMES = ["John", "James", "Peter", "Harry", "Marcus", "Adrian", "Anna", "Beatrice", "Cindy", "Diana", "Eason", "Francis", "Gregory", "Hannna", "Ken", "Elizabeth", "Monty", "Thomas", "Samuel"]
     if wait or DELAY: 
         await asyncio.sleep(random.randint(1, 3))
 
+    sender = random.choice(NAMES)
+    receiver = random.choice(NAMES)
+
+    # Makes sure that duplicates do not happen.
+    #
+    # The while loop makes it so that if a duplicate happens
+    # twice or thrice or n times in a row, it will not register.
+    while sender == receiver:
+        receiver = random.choice(NAMES)
+
     id = curr_transaction_id
     curr_transaction_id += 1
-    res = Transaction(id, random.choice(NAMES), random.choice(NAMES), random.randint(0, 200))
+    res = Transaction(id, sender, receiver, random.randint(0, 200))
 
     if PRINT_TRANSACTIONS:
-        print(f"got transaction {res.id}: {res.sender} gives {res.receiver} {res.amount} Siyyats.")
+        print(f"got transaction {res.id}: \"{res.sender} gives {res.receiver} {res.amount} Siyyats.\"")
 
     return res
 
 async def next_block(prev_block: Block) -> Block:
+    """
+    Function to simulate creating a new block.
+    In a real implementation, this would be a task run
+    on another node over the network,
+    """
+    
     global curr_block_id
 
     if DELAY:
@@ -212,6 +227,7 @@ async def next_block(prev_block: Block) -> Block:
 
     transactions = []
     for _ in range(BLOCK_CAP+1):
+        # simulate waiting for the next block to come over from the network.
         transactions.append(await next_transaction(wait=False))
     timestamp = time.time()
     
@@ -220,71 +236,51 @@ async def next_block(prev_block: Block) -> Block:
     pow = bytes()
     id = curr_block_id
     curr_block_id += 1
-
+    
     b = Block(id, transactions, timestamp, prev_hash, pow)
 
     if PRINT_NEW_BLOCKS:
-        print(f"got block: {b.to_str(include_pow=True)}")
+        print(f"block: {b.to_str(include_pow=True)}")
     return b
 
-class BlockchainClient:
-    username: str
-    node_info: Node # some unique data about each node
-    blocks: list[Block] # every client should have its own blockchain 
-    current_data: list[Transaction]
-    other_nodes: set[Node] # IP addresses of other nodes
+async def main():
+    logging.basicConfig(
+        format="[{asctime} {levelname}] {message}",
+        style="{",
+        datefmt="%Y-%m-%d %H:%M",
+        filename="blocks.log",
+        filemode='a',
+        encoding="utf-8",
+    )
 
-    # pass in the node_id as other logic might provide it
-    def __init__(self, username: str, node_id: int, other_nodes: set[Node]) -> None:
-        self.username = username
-        self.blocks = list() # construct an empty list class
-        self.current_data = list()
-        self.node_id = node_id
-        self.other_nodes = other_nodes
+    #                    id, transactions,                          timestamp,   prev_hash, pow
+    genesis_block = Block(0, [Transaction(0, "Jason", "James", 1)], time.time(), bytes(),   bytes())
+    genesis_block.mine() # generate proof of work for the first block
 
-    async def listen_transaction(self):
-        while True:
-            new_data = await next_transaction() # represents an asynchronous task that grabs the next transaction from peers.
-            self.current_data.append(new_data)
+    # start the blockchain
+    blocks = [genesis_block]
 
-    async def listen_new_blocks(self):
-        while True:
-            new_data = await next_block(self.blocks[len(self.blocks)-1])
-            self.blocks.append(new_data)
-    
-    async def broadcast_transaction(self, transaction: Transaction):
-        t = transaction.to_json()
+    while True:
+        # save the previous block for easy access
+        prev_block = blocks[len(blocks)-1]
 
-        # spawn a task per node and send the data to each node
-        async with asyncio.TaskGroup() as task_group:
-            for node in self.other_nodes:
-                task_group.create_task(node.send(t))
+        # simulate waiting for a block to come over from the network.
+        new_block = await next_block(prev_block)
+        new_block.mine()
 
-    async def run(self):
-        listen_transaction_task = asyncio.create_task(self.listen_transaction())
-        listen_new_blocks_task = asyncio.create_task(self.listen_new_blocks())
+        # Crash if the hashes do not match.
+        #
+        # In a real blockchain, the blockchain would simply be abandoned.
+        # However, this is just a simple demonstration project, meaning
+        # that keeping many of them is not needed.
+        if new_block.prev_hash != prev_block.hash():
+            print("hashes do not match. exiting...")
 
-        while True:
-            choice = input("(e)xit the program or (s)end a transaction? ").strip().lower()[0]
-            
-            match choice:
-                case 's':
-                    name = input("What is the receiver's name? ")
-                    amt = input_int("What is the amount to send (Siyyats)? ")
+        # add it to the blockchain
+        blocks.append(new_block)
 
-                    global curr_transaction_id
-                    id = curr_transaction_id
-                    curr_transaction_id += 1
-                    transaction = Transaction(id, self.username, name, amt)
-                    await self.broadcast_transaction(transaction)
-                case 'e':
-                    break
-                case _:
-                    pass
+        # add it to the log.
+        print(f"{new_block.id}: {new_block.to_str(include_pow=True)}")
 
-        
-        await asyncio.wait(listen_transaction_task)
-        await asyncio.wait(listen_new_blocks_task)
-
-        return
-
+if __name__ == "__main__":
+    asyncio.run(main())
