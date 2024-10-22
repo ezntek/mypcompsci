@@ -1,11 +1,19 @@
+# Criterion C strand 2 for IGCSE (year 2) MYP Computer Science
+#
+# This source code form is wholly licensed under the MIT/expat license.
+# Visit the OSI or FSF websites for more information.
+#
+# Copyright (c) Eason Qin, 2024.
+#
+
 from dataclasses import dataclass
 import json
-import logging
 import asyncio
 import hashlib
+import os
 import random
 import time
-import base64 # encoding bytes to a string for JSON
+import base64  # encoding bytes to a string for JSON
 
 # global values to simulate all clients having a synchronized current transaction and block
 curr_transaction_id = 0
@@ -30,35 +38,52 @@ NIBBLES = 5
 # defines if there should be a delay for asynchronous operations
 DELAY = False
 
+# should the program log the blocks in their compressed string form to the file (True)
+# or as JSON (False)
+LOG_BLOCK_AS_STR = False
+
+
 @dataclass
 class Transaction:
     """
     Class to represent a transaction.
     """
-    id: int 
+
+    id: int
     sender: str
     receiver: str
     amount: int
 
-    def __str__(self) -> str: # allows str(Transaction)
+    def __str__(self) -> str:  # allows str(Transaction)
         return f"({self.id},{self.sender},{self.receiver},{self.amount})"
 
     def to_dict(self) -> dict:
-        d = { "id": self.id, "sender": self.sender, "receiver": self.receiver, "amount": self.amount }
+        d = {
+            "id": self.id,
+            "sender": self.sender,
+            "receiver": self.receiver,
+            "amount": self.amount,
+        }
         return d
 
     def to_json(self) -> str:
         d = self.to_dict()
         return json.dumps(d)
 
-    @staticmethod # class method that does not take self
-    def from_dict(d: dict) -> 'Transaction': # The type checker does not have the current class in scope, so quotes have to be used
+    @staticmethod  # class method that does not take self
+    def from_dict(
+        d: dict,
+    ) -> "Transaction":
+        # The type checker does not have the current class in scope, so quotes have to be used
         return Transaction(d["id"], d["sender"], d["receiver"], d["amount"])
 
-    @staticmethod # class method that does not take self
-    def from_json(data: str) -> 'Transaction': # The type checker does not have the current class in scope, so quotes have to be used
+    @staticmethod  # class method that does not take self
+    def from_json(
+        data: str,
+    ) -> "Transaction":
         d = json.loads(data)
         return Transaction.from_dict(d)
+
 
 @dataclass
 class Block:
@@ -68,47 +93,56 @@ class Block:
 
     id: int
     transactions: list[Transaction]
-    timestamp: float # UNIX timestamp + decimal, from time.time()
+    timestamp: float  # UNIX timestamp + decimal, from time.time()
     prev_hash: bytes
-    pow: bytes # proof of work
+    pow: bytes  # proof of work
 
     # brute force the hash
     def mine(self):
         # the function is only used inside this function,
         # so just declare it inside
         def int_to_bytes(num: int) -> bytes:
-            return num.to_bytes(32, 'big') # specify big-endian encoding
+            return num.to_bytes(32, "big")  # specify big-endian encoding
 
         # if the proof of work is already mined and not empty, leave.
         if self.pow != bytes():
             return
 
-        # base as in the base of the block without the POW
-        base = self.to_str() + '+' # create a "{ <block contents> }+", ready to attatch the POW to
+        # base as in the base data of the block without the POW
+        base = (
+            self.to_str() + "+"
+        )  # create a "{ <block contents> }+", ready to attatch the POW to
         base = base.encode()
         pow = 0
         matching = False
 
         while not matching:
-            pow += 1 
+            pow += 1 # increment the proof of work to try another hash
 
+            # get the bytes of the proof of work
             pow_bytes = int_to_bytes(pow)
+
+            # guess the hash
             potential_base = base + pow_bytes
             guess_hash = hashlib.sha256(potential_base).hexdigest()
-            
+
             if pow % 10000 == 0 and PRINT_HASHES:
                 print(f"{pow}: {guess_hash}")
 
-            zeros = '0' * NIBBLES
-            if guess_hash[:NIBBLES] == zeros: # first 3 bytes (6 nibbles, 24 bits) are 0
+            zeros = "0" * NIBBLES
+            if (
+                guess_hash[:NIBBLES] == zeros
+            ):  # first 3 bytes (6 nibbles, 24 bits) are 0
                 break
 
         self.pow = int_to_bytes(pow)
-    
+
     def hash(self) -> bytes:
         h = self.to_str(include_pow=True)
-        h = bytes(h, 'utf-8') # hashlib expects a ReadableBuffer which str does not implement (but bytes does)
-        h = hashlib.sha256(h).digest() # digest at the end to get a bytes
+        h = bytes(
+            h, "utf-8"
+        )  # hashlib expects a ReadableBuffer which str does not implement (but bytes does)
+        h = hashlib.sha256(h).digest()  # digest at the end to get a bytes
         return h
 
     # Functions to encode/serialize/deserialize the block
@@ -116,8 +150,8 @@ class Block:
     def to_str(self, include_pow=False) -> str:
         """
         Encodes a block to a string to calculate the proof of work.
-        We can't use __str__ because we need a keyword argument, callers can choose between adding the proof of
-        work to the end, like so:
+        We can't use __str__ because we need a keyword argument, callers can
+        choose between adding the proof of work to the end, like so:
 
         "{index;transactions;timestamp;previous hash}"
 
@@ -125,7 +159,7 @@ class Block:
 
         "{index;transactions;timestamp;previous hash}+proof of work"
         """
-        
+
         # start building transaction string
         transactions = "["
 
@@ -135,46 +169,57 @@ class Block:
             # stringify each transaction and add a semicolon if it is not
             # the last element
             transactions += str(transaction)
-            if idx != len(self.transactions)-1:
-                transactions += ';'
+            if idx != len(self.transactions) - 1:
+                transactions += ";"
 
         transactions += "]"
-        
+
         # build the string
         res = f"{{{self.id};{transactions};{self.timestamp};{self.prev_hash.hex()}}}"
         if include_pow:
             res += f"+{self.pow.hex()}}}"
-        
+
         return res
 
     def to_dict(self) -> dict:
         d = {
             "id": self.id,
-            "transactions": [transaction.to_dict() for transaction in self.transactions],
-            "prev_hash": base64.b64encode(self.prev_hash).decode('utf-8'), # encode it as a base64 object and immediately
-                                                                          # chain the result to decode it into UTF-8
-            "pow": base64.b64encode(self.prev_hash).decode('utf-8'),
+            "transactions": [
+                transaction.to_dict() for transaction in self.transactions
+            ],
+            "prev_hash": base64.b64encode(self.prev_hash).decode(
+                "utf-8"
+            ),  # encode it as a base64 object and immediately
+            # chain the result to decode it into UTF-8
+            "pow": base64.b64encode(self.prev_hash).decode("utf-8"),
             "timestamp": self.timestamp,
         }
         return d
 
     def to_json(self) -> str:
         d = self.to_dict()
-        return json.dumps(d)
+        return json.dumps(d, indent=4)
 
-    @staticmethod # class method that does not take self
-    def from_dict(data: dict) -> 'Block': # The type checker does not have the current class in scope, so quotes have to be used
+    @staticmethod  # class method that does not take self
+    def from_dict(
+        data: dict,
+    ) -> (
+        "Block"
+    ):  # The type checker does not have the current class in scope, so quotes have to be used
         id = data["id"]
-        transactions = [Transaction.from_dict(transaction) for transaction in data["transactions"]]
+        transactions = [
+            Transaction.from_dict(transaction) for transaction in data["transactions"]
+        ]
         prev_hash = base64.b64decode(data["prev_hash"])
         pow = base64.b64decode(data["pow"])
         timestamp = data["timestamp"]
         return Block(id, transactions, timestamp, prev_hash, pow)
 
     @staticmethod
-    def from_json(data: str) -> 'Block':
+    def from_json(data: str) -> "Block":
         d = json.loads(data)
         return Block.from_dict(d)
+
 
 async def next_transaction(wait=True) -> Transaction:
     """
@@ -188,10 +233,30 @@ async def next_transaction(wait=True) -> Transaction:
     transactions being put into the system.
     """
 
-    global curr_transaction_id 
+    global curr_transaction_id
 
-    NAMES = ["John", "James", "Peter", "Harry", "Marcus", "Adrian", "Anna", "Beatrice", "Cindy", "Diana", "Eason", "Francis", "Gregory", "Hannna", "Ken", "Elizabeth", "Monty", "Thomas", "Samuel"]
-    if wait or DELAY: 
+    NAMES = [
+        "John",
+        "James",
+        "Peter",
+        "Harry",
+        "Marcus",
+        "Adrian",
+        "Anna",
+        "Beatrice",
+        "Cindy",
+        "Diana",
+        "Eason",
+        "Francis",
+        "Gregory",
+        "Hannna",
+        "Ken",
+        "Elizabeth",
+        "Monty",
+        "Thomas",
+        "Samuel",
+    ]
+    if wait or DELAY:
         await asyncio.sleep(random.randint(1, 3))
 
     sender = random.choice(NAMES)
@@ -209,9 +274,12 @@ async def next_transaction(wait=True) -> Transaction:
     res = Transaction(id, sender, receiver, random.randint(0, 200))
 
     if PRINT_TRANSACTIONS:
-        print(f"got transaction {res.id}: \"{res.sender} gives {res.receiver} {res.amount} Siyyats.\"")
+        print(
+            f'got transaction {res.id}: "{res.sender} gives {res.receiver} {res.amount} Siyyats."'
+        )
 
     return res
+
 
 async def next_block(prev_block: Block) -> Block:
     """
@@ -219,68 +287,95 @@ async def next_block(prev_block: Block) -> Block:
     In a real implementation, this would be a task run
     on another node over the network,
     """
-    
+
     global curr_block_id
 
     if DELAY:
         await asyncio.sleep(random.randint(1, 10))
 
     transactions = []
-    for _ in range(BLOCK_CAP+1):
+    for _ in range(BLOCK_CAP + 1):
         # simulate waiting for the next block to come over from the network.
         transactions.append(await next_transaction(wait=False))
     timestamp = time.time()
-    
+
     # grab the hash of the previous block
     prev_hash = prev_block.hash()
     pow = bytes()
     id = curr_block_id
     curr_block_id += 1
-    
+
     b = Block(id, transactions, timestamp, prev_hash, pow)
 
     if PRINT_NEW_BLOCKS:
         print(f"block: {b.to_str(include_pow=True)}")
     return b
 
+
 async def main():
-    logging.basicConfig(
-        format="[{asctime} {levelname}] {message}",
-        style="{",
-        datefmt="%Y-%m-%d %H:%M",
-        filename="blocks.log",
-        filemode='a',
-        encoding="utf-8",
-    )
+    # Remove the log if it already exists.
+    os.remove("blocks.log")
 
-    #                    id, transactions,                          timestamp,   prev_hash, pow
-    genesis_block = Block(0, [Transaction(0, "Jason", "James", 1)], time.time(), bytes(),   bytes())
-    genesis_block.mine() # generate proof of work for the first block
+    # Open it
+    log = open("blocks.log", "a+")
 
-    # start the blockchain
-    blocks = [genesis_block]
+    try:
+        genesis_block = Block(
+        #  id,  Transactions,                         timestamp   prev_hash, pow    
+            0, [Transaction(0, "Jason", "James", 1)], time.time(), bytes(), bytes()
+        )
+        genesis_block.mine()  # generate proof of work for the first block
 
-    while True:
-        # save the previous block for easy access
-        prev_block = blocks[len(blocks)-1]
+        # start the blockchain
+        blocks = [genesis_block]
 
-        # simulate waiting for a block to come over from the network.
-        new_block = await next_block(prev_block)
-        new_block.mine()
+        while True:
+            # save the previous block for easy access
+            prev_block = blocks[len(blocks) - 1]
 
-        # Crash if the hashes do not match.
-        #
-        # In a real blockchain, the blockchain would simply be abandoned.
-        # However, this is just a simple demonstration project, meaning
-        # that keeping many of them is not needed.
-        if new_block.prev_hash != prev_block.hash():
-            print("hashes do not match. exiting...")
+            # simulate waiting for a block to come over from the network.
+            new_block = await next_block(prev_block)
+            new_block.mine()
 
-        # add it to the blockchain
-        blocks.append(new_block)
+            # Crash if the hashes do not match.
+            #
+            # In a real blockchain, the blockchain would simply be abandoned.
+            # However, this is just a simple demonstration project, meaning
+            # that keeping many of them is not needed.
+            if new_block.prev_hash != prev_block.hash():
+                print("hashes do not match. exiting...")
 
-        # add it to the log.
-        print(f"{new_block.id}: {new_block.to_str(include_pow=True)}")
+            # add it to the blockchain
+            blocks.append(new_block)
+
+            # print it out to log it
+            print(f"{new_block.id}: {new_block.to_str(include_pow=True)}")
+    
+            # log JSON to the file by default to simulate sending over the network,
+            # but allow writing the string form too.
+
+            if LOG_BLOCK_AS_STR:
+                block_str = new_block.to_str(include_pow=True)
+            else:
+                block_str = new_block.to_json()
+
+            # log the current block ID minus one, as it would have been
+            # incremented for the next block already.
+            log.write(f"Block {curr_block_id-1}\n=====================\n")
+            log.write(block_str)
+            log.write("\n")
+
+            # File writing in python is done to a buffer.
+            # Flush flushes the contents of the buffer to the file, effectively
+            # saving changes.
+            log.flush()
+
+    # Error handling for Ctrl-C and to close the file despite all errors
+    except KeyboardInterrupt or EOFError:
+        log.close()
+    finally:
+        log.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
